@@ -1,0 +1,170 @@
+import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
+from fpdf import FPDF
+import os
+from datetime import date
+
+# --- पेज सेटिंग ---
+st.set_page_config(page_title="Secure Ledger App", layout="wide")
+
+# ==========================================
+# 🔐 1. लॉगिन सिस्टम (LOGIN SYSTEM)
+# ==========================================
+if 'logged_in' not in st.session_state:
+    st.session_state['logged_in'] = False
+
+def check_login():
+    st.title("🔒 Login Required")
+    st.markdown("Please enter your credentials to access the Ledger.")
+    
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        
+        if st.button("Login"):
+            # --- पासवर्ड: admin / 12345 ---
+            if username == "admin" and password == "12345":
+                st.session_state['logged_in'] = True
+                st.rerun()
+            else:
+                st.error("❌ Incorrect Username or Password")
+
+# ==========================================
+# 📊 2. मुख्य ऐप (MAIN APP LOGIC)
+# ==========================================
+def main_app():
+    # साइडबार में लॉगआउट बटन
+    with st.sidebar:
+        st.write(f"User: Admin")
+        if st.button("Log Out"):
+            st.session_state['logged_in'] = False
+            st.rerun()
+    
+    st.title("📊 GeM Contract Manager & Ledger")
+
+    # --- TABS: नया एंट्री vs पुराना इतिहास ---
+    tab1, tab2 = st.tabs(["➕ New Entry / Calculator", "📜 View History"])
+
+    # ==========================
+    # TAB 1: कैलकुलेटर और एंट्री
+    # ==========================
+    with tab1:
+        st.markdown("### Calculate Profit & Save Entry")
+        
+        # --- फॉर्म ---
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            contract_no = st.text_input("Contract No", "GEMC-511687769269311")
+            entry_date = st.date_input("Date", date.today())
+        with col2:
+            agency_name = st.text_input("Agency Name", "Ordnance Clothing Factory")
+            invoice_no = st.text_input("Invoice No", "31")
+        with col3:
+            item_name = st.text_input("Item Particular", "Good Year 215/75 R15 TL")
+            qty = st.text_input("Quantity", "08 Nos")
+
+        st.markdown("---")
+        st.subheader("Financials (₹)")
+        
+        c1, c2, c3, c4 = st.columns(4)
+        purchase_val = c1.number_input("Purchase Value", value=40000)
+        transport = c2.number_input("Transport Charge", value=1644)
+        sale_val = c3.number_input("Sale Amount", value=46680)
+        
+        # GST Inputs
+        c5, c6 = st.columns(2)
+        purchase_gst = c5.number_input("Purchase GST (Input)", value=8750)
+        sale_gst = c6.number_input("Sale GST (Output)", value=10211)
+
+        # --- गणना (Calculations) ---
+        total_investment = purchase_val + transport
+        net_profit = sale_val - total_investment
+        net_gst = sale_gst - purchase_gst
+        gst_status = "Payable" if net_gst > 0 else "Credit"
+
+        # --- रिजल्ट दिखाना ---
+        st.success(f"💰 Net Profit: ₹ {net_profit:,} | 🏦 GST {gst_status}: ₹ {abs(net_gst):,}")
+
+        # --- चार्ट्स ---
+        ch1, ch2 = st.columns(2)
+        with ch1:
+            fig1, ax1 = plt.subplots(figsize=(4, 3))
+            ax1.bar(['Purchase', 'Trans', 'Profit'], [purchase_val, transport, net_profit], color=['#ff9999', '#66b3ff', '#99ff99'])
+            ax1.set_title("Cost Breakdown")
+            st.pyplot(fig1)
+        
+        # --- सेव और PDF बटन ---
+        col_btn1, col_btn2 = st.columns(2)
+        
+        # 1. Save Button
+        if col_btn1.button("💾 Save Entry to History"):
+            new_data = {
+                "Date": [entry_date],
+                "Contract": [contract_no],
+                "Agency": [agency_name],
+                "Total_Invest": [total_investment],
+                "Sale_Amt": [sale_val],
+                "Profit": [net_profit],
+                "GST_Net": [net_gst]
+            }
+            df_new = pd.DataFrame(new_data)
+            
+            # CSV में जोड़ें
+            file_path = 'ledger_db.csv'
+            header_needed = not os.path.isfile(file_path)
+            df_new.to_csv(file_path, mode='a', header=header_needed, index=False)
+            st.toast("✅ Entry Saved Successfully!", icon="🎉")
+
+        # 2. PDF Button
+        def create_pdf():
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", 'B', 16)
+            pdf.cell(200, 10, txt="GeM Contract Report", ln=True, align='C')
+            pdf.set_font("Arial", size=12)
+            pdf.ln(10)
+            pdf.cell(0, 10, f"Contract: {contract_no}", ln=True)
+            pdf.cell(0, 10, f"Agency: {agency_name}", ln=True)
+            pdf.ln(5)
+            pdf.cell(0, 10, f"Total Investment: {total_investment} | Sale: {sale_val}", ln=True)
+            pdf.set_font("Arial", 'B', 12)
+            pdf.cell(0, 10, f"NET PROFIT: {net_profit}", ln=True)
+            return pdf.output(dest='S').encode('latin-1')
+
+        pdf_data = create_pdf()
+        col_btn2.download_button("📄 Download PDF", data=pdf_data, file_name=f"Report_{contract_no}.pdf", mime="application/pdf")
+
+    # ==========================
+    # TAB 2: इतिहास (HISTORY)
+    # ==========================
+    with tab2:
+        st.header("📜 Transaction History")
+        
+        file_path = 'ledger_db.csv'
+        if os.path.exists(file_path):
+            # डेटा पढ़ें
+            df = pd.read_csv(file_path)
+            
+            # सबसे ऊपर कुछ बड़े आंकड़े दिखाएं
+            total_profit_all = df['Profit'].sum() if 'Profit' in df.columns else 0
+            st.metric("🏆 Total Profit (Till Date)", f"₹ {total_profit_all:,}")
+            
+            # पूरी टेबल दिखाएं
+            st.dataframe(df, use_container_width=True)
+            
+            # CSV डाउनलोड बटन
+            csv_data = df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Download Full Excel/CSV", data=csv_data, file_name="Full_Ledger.csv", mime="text/csv")
+            
+        else:
+            st.info("⚠️ No records found yet. Please save data first.")
+
+# ==========================================
+# 🚀 3. ऐप चलाना
+# ==========================================
+if not st.session_state['logged_in']:
+    check_login()
+else:
+    main_app()
